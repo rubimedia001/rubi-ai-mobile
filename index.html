@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#180914">
+<title>RUBI AI</title>
+<style>
+:root {
+  color-scheme: dark;
+  --ruby: #660033;
+  --gold: #b99753;
+  --bg: #120a10;
+  --panel: #21151e;
+  --text: #f8edf4;
+  --muted: #c1aeb9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px system-ui, sans-serif;
+}
+header {
+  padding: 22px 18px; text-align: center;
+  background: linear-gradient(135deg, #660033, #260d20);
+  border-bottom: 1px solid var(--gold);
+}
+h1 { margin: 0; letter-spacing: 3px; }
+header p { margin: 6px 0 0; color: #ead5df; }
+main { max-width: 700px; margin: auto; padding: 16px; }
+.panel {
+  background: var(--panel); border: 1px solid #493041;
+  border-radius: 14px; padding: 16px; margin-bottom: 14px;
+}
+.status { color: var(--gold); font-size: 14px; }
+#chat {
+  height: 270px; overflow-y: auto; margin: 14px 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.message {
+  padding: 11px 13px; border-radius: 12px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.rubi { background: #382033; align-self: flex-start; max-width: 95%; }
+.user { background: var(--ruby); align-self: flex-end; max-width: 95%; }
+input, textarea, button {
+  width: 100%; font: inherit; border-radius: 9px;
+  padding: 12px; margin-top: 8px;
+}
+input, textarea {
+  color: var(--text); background: #130d12;
+  border: 1px solid #654657;
+}
+button {
+  background: var(--ruby); color: white;
+  border: 1px solid var(--gold); cursor: pointer;
+}
+button:focus, input:focus, textarea:focus {
+  outline: 2px solid var(--gold); outline-offset: 2px;
+}
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+small, .hint { color: var(--muted); line-height: 1.5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RUBI AI</h1>
+  <p>Your personal assistant · Prototype 0.1</p>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="status" id="status">SYSTEM READY · LOCAL PROTOTYPE</div>
+    <div id="chat" aria-live="polite">
+      <div class="message rubi">
+        RUBI AI: Online interface ready. I'm your prototype,
+        and my full AI brain has not been connected yet.
+        Try saying "help" or "what time is it?"
+      </div>
+    </div>
+    <form id="chatForm">
+      <label for="message">Message RUBI AI</label>
+      <input id="message" autocomplete="off"
+        placeholder="Type a message..." required>
+      <div class="actions">
+        <button type="submit">Send message</button>
+        <button type="button" id="mic">🎙 Speak</button>
+      </div>
+    </form>
+    <button type="button" id="speakToggle">🔊 Voice replies: ON</button>
+    <p class="hint">Voice recognition depends on browser support
+      and may send audio to an online service.</p>
+  </section>
+
+  <section class="panel">
+    <h2>My Notes</h2>
+    <p class="hint">Notes are stored in this browser on this device.
+      They are not synced to another phone or computer.</p>
+    <textarea id="notes" rows="4"
+      placeholder="Save project ideas and reminders here..."></textarea>
+    <button id="saveNotes">Save notes on this device</button>
+    <p id="noteStatus" class="status"></p>
+  </section>
+</main>
+
+<script>
+const chat = document.getElementById("chat");
+const input = document.getElementById("message");
+const statusLine = document.getElementById("status");
+const notes = document.getElementById("notes");
+let voiceReplies = true;
+
+function addMessage(text, who) {
+  const bubble = document.createElement("div");
+  bubble.className = "message " + who;
+  bubble.textContent = text;
+  chat.appendChild(bubble);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function say(text) {
+  if (!voiceReplies || !("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-NG";
+  window.speechSynthesis.speak(utterance);
+}
+
+function replyTo(message) {
+  const q = message.toLowerCase().trim();
+
+  if (q.includes("time")) {
+    return "The time is " +
+      new Date().toLocaleTimeString([], {
+        hour: "2-digit", minute: "2-digit"
+      }) + ".";
+  }
+  if (q.includes("date") || q.includes("day")) {
+    return "Today is " +
+      new Date().toLocaleDateString([], {
+        weekday: "long", year: "numeric",
+        month: "long", day: "numeric"
+      }) + ".";
+  }
+  if (q === "hi" || q === "hello" || q.includes("hello rubi")) {
+    return "Hello! RUBI AI is ready. What shall we work on?";
+  }
+  if (q.includes("help")) {
+    return "Try: hello, what time is it, what is today's date, or save your ideas in My Notes. Full AI and computer control are not connected yet.";
+  }
+  return "I received: \"" + message +
+    "\". My online AI brain is not connected yet. This is the first interface milestone.";
+}
+
+document.getElementById("chatForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const message = input.value.trim();
+  if (!message) return;
+  addMessage("You: " + message, "user");
+  const answer = replyTo(message);
+  addMessage("RUBI AI: " + answer, "rubi");
+  say(answer);
+  input.value = "";
+});
+
+document.getElementById("speakToggle").addEventListener("click", () => {
+  voiceReplies = !voiceReplies;
+  document.getElementById("speakToggle").textContent =
+    voiceReplies ? "🔊 Voice replies: ON" : "🔇 Voice replies: OFF";
+  if (!voiceReplies && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+});
+
+document.getElementById("mic").addEventListener("click", () => {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    statusLine.textContent =
+      "VOICE INPUT NOT AVAILABLE · Please type or use your keyboard microphone.";
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "en-NG";
+  recognition.interimResults = false;
+  recognition.continuous = false;
+
+  recognition.onstart = () => {
+    statusLine.textContent = "LISTENING · Speak now";
+  };
+  recognition.onresult = event => {
+    input.value = event.results[0][0].transcript;
+    statusLine.textContent = "VOICE CAPTURED · Check the text, then press Send";
+    input.focus();
+  };
+  recognition.onerror = () => {
+    statusLine.textContent =
+      "VOICE INPUT FAILED · Check microphone permission or type instead";
+  };
+  recognition.onend = () => {
+    if (statusLine.textContent === "LISTENING · Speak now") {
+      statusLine.textContent = "SYSTEM READY · LOCAL PROTOTYPE";
+    }
+  };
+
+  try { recognition.start(); }
+  catch (err) {
+    statusLine.textContent = "Could not start microphone. Try again.";
+  }
+});
+
+try {
+  notes.value = localStorage.getItem("rubiNotes") || "";
+} catch (err) {
+  document.getElementById("noteStatus").textContent =
+    "Browser storage is unavailable in this session.";
+}
+
+document.getElementById("saveNotes").addEventListener("click", () => {
+  try {
+    localStorage.setItem("rubiNotes", notes.value);
+    document.getElementById("noteStatus").textContent =
+      "Notes saved in this browser on this device.";
+  } catch (err) {
+    document.getElementById("noteStatus").textContent =
+      "Could not save notes. Check browser storage settings.";
+  }
+});
+</script>
+</body>
+      </html>
+      
