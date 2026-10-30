@@ -294,6 +294,13 @@ const speakToggle = document.getElementById("speakToggle");
 const noteStatus = document.getElementById("noteStatus");
 
 let voiceReplies = true;
+  // RUBI AI LOCAL GEMMA ENGINE
+let rubiAI = null;
+let aiReady = false;
+let chatHistory = [];
+
+const modelFile = document.getElementById("modelFile");
+const modelStatus = document.getElementById("modelStatus");
 
 function addMessage(text, who) {
   const bubble = document.createElement("div");
