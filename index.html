@@ -318,9 +318,9 @@ const modelStatus = document.getElementById("modelStatus");
       baseOptions: {
         modelAssetBuffer: reader
       },
-      maxTokens: 1024,
-      topK: 64,
-      temperature: 1.0
+      maxTokens: 256,
+topK: 32,
+temperature: 0.7
     });
 
     aiReady = true;
@@ -489,6 +489,405 @@ try {
         // Keep only the latest 20 messages.
         if (chatHistory.length > 20) {
           chatHistory = chatHistory.slice(-20);
+        }
+
+        say(fullResponse.trim());
+      }
+    }
+  });
+
+} catch (error) {
+  console.error(error);
+
+  responseBubble.textContent =
+    "RUBI AI: I encountered an error generating a response.";
+
+  statusLine.textContent = "AI RESPONSE ERROR";
+  }
+  }
+);
+// ==========================================
+// VOICE REPLIES ON / OFF
+// ==========================================
+
+speakToggle.addEventListener("click", () => {
+  voiceReplies = !voiceReplies;
+
+  speakToggle.textContent = voiceReplies
+    ? "🔊 Voice replies: ON"
+    : "🔇 Voice replies: OFF";
+
+  if (
+    !voiceReplies &&
+    "speechSynthesis" in window
+  ) {
+    window.speechSynthesis.cancel();
+  }
+});
+
+// ==========================================
+// VOICE INPUT AND CONTINUOUS LISTENING
+// ==========================================
+
+const MAX_LISTENING_MS = 5 * 60 * 1000;
+const RESTART_DELAY_MS = 1000;
+
+let recognition = null;
+let recognitionActive = false;
+let recognitionStarting = false;
+let recognitionMode = "single";
+
+let listeningRequested = false;
+let restartTimer = null;
+let listeningTimer = null;
+let sessionNumber = 0;
+
+function updateVoiceStatus(message) {
+  voiceStatus.textContent = message;
+  statusLine.textContent = message;
+}
+
+function getSpeechRecognition() {
+  return (
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition ||
+    null
+  );
+}
+
+function clearVoiceTimers() {
+  if (restartTimer !== null) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
+  if (listeningTimer !== null) {
+    clearTimeout(listeningTimer);
+    listeningTimer = null;
+  }
+}
+
+function resetContinuousControls() {
+  continuousMic.disabled = false;
+  stopMic.disabled = true;
+}
+
+function stopContinuousListening(message) {
+  // Disable restart before asking the browser to stop.
+  listeningRequested = false;
+  clearVoiceTimers();
+
+  resetContinuousControls();
+
+  const currentRecognition = recognition;
+
+  if (
+    currentRecognition &&
+    recognitionMode === "continuous"
+  ) {
+    try {
+      currentRecognition.stop();
+    } catch (error) {
+      // The browser may already have stopped recognition.
+    }
+  }
+
+  updateVoiceStatus(
+    message || "Continuous listening is OFF."
+  );
+}
+
+function startRecognition(mode) {
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Use a supported browser or type instead."
+    );
+    return;
+  }
+
+  if (recognitionActive || recognitionStarting) {
+    updateVoiceStatus(
+      "A microphone session is already starting or running."
+    );
+    return;
+  }
+
+  if (
+    mode === "continuous" &&
+    !listeningRequested
+  ) {
+    return;
+  }
+
+  recognitionMode = mode;
+
+  const thisSession = ++sessionNumber;
+  const currentRecognition = new SpeechRecognition();
+
+  recognition = currentRecognition;
+  recognitionStarting = true;
+
+  currentRecognition.lang = "en-NG";
+  currentRecognition.interimResults = false;
+
+  // Continuous mode allows multiple final results
+  // during one listening session.
+  currentRecognition.continuous =
+    mode === "continuous";
+
+  currentRecognition.onstart = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionStarting = false;
+    recognitionActive = true;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "LISTENING · Speak naturally. Press STOP to finish."
+      );
+    } else {
+      updateVoiceStatus("LISTENING · Speak now.");
+    }
+  };
+
+  currentRecognition.onresult = event => {
+    if (thisSession !== sessionNumber) return;
+
+    // Only use final results to avoid inserting partial
+    // words repeatedly while the browser is listening.
+    let transcript = "";
+
+    for (
+      let i = event.resultIndex;
+      i < event.results.length;
+      i++
+    ) {
+      if (event.results[i].isFinal) {
+        transcript +=
+          event.results[i][0].transcript + " ";
+      }
+    }
+
+    transcript = transcript.trim();
+
+    if (!transcript) return;
+
+    // Never automatically send recognised speech.
+    if (mode === "continuous") {
+      input.value = [
+        input.value.trim(),
+        transcript
+      ].filter(Boolean).join(" ");
+
+      updateVoiceStatus(
+        "WORDS CAPTURED · Review the text. Listening remains active."
+      );
+    } else {
+      input.value = transcript;
+
+      updateVoiceStatus(
+        "VOICE CAPTURED · Check the text, then press Send."
+      );
+    }
+
+    input.focus();
+  };
+
+  currentRecognition.onerror = event => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE ERROR: " + event.error +
+      " · Check microphone permission or type instead."
+    );
+  };
+
+  currentRecognition.onend = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      // Some browsers end a session after a pause.
+      // Restart only if the user has not pressed STOP.
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+
+        if (
+          listeningRequested &&
+          !recognitionActive &&
+          !recognitionStarting
+        ) {
+          startRecognition("continuous");
+        }
+      }, RESTART_DELAY_MS);
+
+      return;
+    }
+
+    if (mode === "continuous") {
+      resetContinuousControls();
+
+      if (!listeningRequested) {
+        updateVoiceStatus(
+          "Continuous listening is OFF."
+        );
+      }
+    } else if (
+      voiceStatus.textContent.startsWith("LISTENING")
+    ) {
+      updateVoiceStatus(
+        "SYSTEM READY · LOCAL PROTOTYPE"
+      );
+    }
+  };
+
+  try {
+    currentRecognition.start();
+  } catch (error) {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "COULD NOT START MICROPHONE · Check permission and try again."
+    );
+  }
+}
+
+// ------------------------------------------
+// ORIGINAL ONE-PHRASE SPEAK BUTTON
+// ------------------------------------------
+
+document.getElementById("mic").addEventListener(
+  "click",
+  () => {
+    if (
+      recognitionActive ||
+      recognitionStarting ||
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "Stop the current listening session before using Speak."
+      );
+      return;
+    }
+
+    startRecognition("single");
+  }
+);
+
+// ------------------------------------------
+// START CONTINUOUS LISTENING
+// ------------------------------------------
+
+continuousMic.addEventListener("click", () => {
+  if (
+    recognitionActive ||
+    recognitionStarting ||
+    listeningRequested
+  ) {
+    return;
+  }
+
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Try a supported browser."
+    );
+    return;
+  }
+
+  listeningRequested = true;
+
+  continuousMic.disabled = true;
+  stopMic.disabled = false;
+
+  updateVoiceStatus(
+    "STARTING MICROPHONE · Allow access if asked."
+  );
+
+  // Hard limit: one continuous session can last
+  // no longer than five minutes.
+  listeningTimer = setTimeout(() => {
+    stopContinuousListening(
+      "5-MINUTE LIMIT REACHED · Listening stopped."
+    );
+  }, MAX_LISTENING_MS);
+
+  startRecognition("continuous");
+});
+
+// ------------------------------------------
+// STOP BUTTON
+// ------------------------------------------
+
+stopMic.addEventListener("click", () => {
+  stopContinuousListening(
+    "LISTENING STOPPED BY YOU."
+  );
+});
+
+// ==========================================
+// MY NOTES - LOCAL DEVICE STORAGE
+// ==========================================
+
+try {
+  notes.value = localStorage.getItem("rubiNotes") || "";
+} catch (error) {
+  noteStatus.textContent =
+    "Browser storage is unavailable in this session.";
+}
+
+document.getElementById("saveNotes").addEventListener(
+  "click",
+  () => {
+    try {
+      localStorage.setItem("rubiNotes", notes.value);
+
+      noteStatus.textContent =
+        "Notes saved in this browser on this device.";
+    } catch (error) {
+      noteStatus.textContent =
+        "Could not save notes. Check browser storage settings.";
+    }
+  }
+);
+</script>
+</body>
+  </html>chatHistory = chatHistory.slice(-20);
         }
 
         say(fullResponse.trim());
