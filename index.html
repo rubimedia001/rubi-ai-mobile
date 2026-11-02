@@ -498,6 +498,401 @@ document.getElementById("chatForm").addEventListener(
 
     const savedMemory = personalMemory.value.trim();
 const recentHistory = chatHistory
+  .slice(-4)
+  .map(item =>
+    (item.role === "user" ? "User: " : "RUBI AI: ") + item.text
+  )
+  .join("\n");
+const query =
+  "IDENTITY: You are RUBI AI, a personal AI assistant created by Reuben Okechukwu David. " +
+"Your name is RUBI AI. The human user is Reuben Okechukwu David, also known as Rubi. " +
+"Never confuse the user's identity with your own. If asked for the user's name, answer Reuben Okechukwu David. " +
+"You are powered by Google's Gemma AI model, but RUBI AI was created by Reuben. " +
+
+  "PERSONALITY: Be intelligent, friendly, natural, thoughtful and helpful. " +
+  "Communicate like a capable personal assistant, not a robotic chatbot. " +
+
+  "BEHAVIOUR: Understand the user's question before answering. " +
+  "Give direct, relevant and useful answers. " +
+  "Avoid repetitive, vague or meaningless responses. " +
+  "Do not say you are processing information instead of answering. " +
+  "Never use placeholders such as [insert story] or [suggest a movie]. " +
+  "When asked to write a story, poem or other content, actually write it. " +
+  "When asked for recommendations, provide real examples and explain your choices. " +
+  "Never invent facts or pretend to have completed an action you have not performed. " +
+  "You do not have human feelings or personal experiences. Be honest about this. " +
+
+  "RESPONSE CONTROL: Answer only the user's latest message. " +
+  "Use recent conversation only as background context. " +
+  "Never continue or recreate the conversation transcript. " +
+  "Never invent messages from the user. " +
+  "Never write labels such as USER'S MESSAGE, User:, or RUBI AI: in your answer. " +
+  "Never generate imaginary questions and answers after completing your response. " +
+  "Give one direct, complete response and then stop. " +
+
+  "MEMORY: Use the saved personal information below whenever relevant. " +
+  "Do not claim to remember information that is not available to you. " +
+
+  "SAVED PERSONAL INFORMATION: " +
+  (savedMemory || "No saved personal information.") +
+
+  "\n\nRECENT CONVERSATION:\n" +
+  (recentHistory || "No previous conversation.") +
+
+  "\n\nUSER'S MESSAGE: " + message +
+  "\n\nRUBI AI:";
+
+let fullResponse = "";
+
+    try {
+      rubiAI.generateResponse(query, (partialResults, complete) => {
+        if (partialResults) {
+          fullResponse += partialResults;
+          responseBubble.textContent = "RUBI AI: " + fullResponse;
+        }
+
+        chat.scrollTop = chat.scrollHeight;
+
+        if (complete) {
+          isGenerating = false;
+          statusLine.textContent =
+            "RUBI AI READY · LOCAL GEMMA ENGINE";
+
+          if (fullResponse.trim()) {
+            chatHistory.push({
+              role: "user",
+              text: message
+            });
+
+            chatHistory.push({
+              role: "model",
+              text: fullResponse.trim()
+            });
+
+            say(fullResponse.trim());
+          } else {
+            responseBubble.textContent =
+              "RUBI AI: No response generated. Please try again.";
+          }
+        }
+      });
+    } catch (error) {
+      isGenerating = false;
+      console.error(error);
+
+      responseBubble.textContent =
+        "RUBI AI ERROR: " + (error.message || String(error));
+
+      statusLine.textContent = "AI RESPONSE ERROR";
+    }
+  }
+);
+
+// ==========================================
+// VOICE REPLIES ON / OFF
+// ==========================================
+
+speakToggle.addEventListener("click", () => {
+  voiceReplies = !voiceReplies;
+
+  speakToggle.textContent = voiceReplies
+    ? "🔊 Voice replies: ON"
+    : "🔇 Voice replies: OFF";
+
+  if (
+    !voiceReplies &&
+    "speechSynthesis" in window
+  ) {
+    window.speechSynthesis.cancel();
+  }
+});
+  function updateVoiceStatus(message) {
+  voiceStatus.textContent = message;
+  statusLine.textContent = message;
+  }
+
+function getSpeechRecognition() {
+  return (
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition ||
+    null
+  );
+}
+
+function clearVoiceTimers() {
+  if (restartTimer !== null) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
+  if (listeningTimer !== null) {
+    clearTimeout(listeningTimer);
+    listeningTimer = null;
+  }
+}
+
+function resetContinuousControls() {
+  continuousMic.disabled = false;
+  stopMic.disabled = true;
+}
+
+function stopContinuousListening(message) {
+  // Disable restart before asking the browser to stop.
+  listeningRequested = false;
+  clearVoiceTimers();
+
+  resetContinuousControls();
+
+  const currentRecognition = recognition;
+
+  if (
+    currentRecognition &&
+    recognitionMode === "continuous"
+  ) {
+    try {
+      currentRecognition.stop();
+    } catch (error) {
+      // The browser may already have stopped recognition.
+    }
+  }
+
+  updateVoiceStatus(
+    message || "Continuous listening is OFF."
+  );
+}
+
+function startRecognition(mode) {
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Use a supported browser or type instead."
+    );
+    return;
+  }
+
+  if (recognitionActive || recognitionStarting) {
+    updateVoiceStatus(
+      "A microphone session is already starting or running."
+    );
+    return;
+  }
+
+  if (
+    mode === "continuous" &&
+    !listeningRequested
+  ) {
+    return;
+  }
+
+  recognitionMode = mode;
+
+  const thisSession = ++sessionNumber;
+  const currentRecognition = new SpeechRecognition();
+
+  recognition = currentRecognition;
+  recognitionStarting = true;
+
+  currentRecognition.lang = "en-NG";
+  currentRecognition.interimResults = false;
+
+  // Continuous mode allows multiple final results
+  // during one listening session.
+  currentRecognition.continuous =
+    mode === "continuous";
+
+  currentRecognition.onstart = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionStarting = false;
+    recognitionActive = true;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "LISTENING · Speak naturally. Press STOP to finish."
+      );
+    } else {
+      updateVoiceStatus("LISTENING · Speak now.");
+    }
+  };
+
+  currentRecognition.onresult = event => {
+    if (thisSession !== sessionNumber) return;
+
+    // Only use final results to avoid inserting partial
+    // words repeatedly while the browser is listening.
+    let transcript = "";
+
+    for (
+      let i = event.resultIndex;
+      i < event.results.length;
+      i++
+    ) {
+      if (event.results[i].isFinal) {
+        transcript +=
+          event.results[i][0].transcript + " ";
+      }
+    }
+
+    transcript = transcript.trim();
+
+    if (!transcript) return;
+
+    // Never automatically send recognised speech.
+    if (mode === "continuous") {
+      input.value = [
+        input.value.trim(),
+        transcript
+      ].filter(Boolean).join(" ");
+
+      updateVoiceStatus(
+        "WORDS CAPTURED · Review the text. Listening remains active."
+      );
+    } else {
+      input.value = transcript;
+
+      updateVoiceStatus(
+        "VOICE CAPTURED · Check the text, then press Send."
+      );
+    }
+
+    input.focus();
+  };
+
+  currentRecognition.onerror = event => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE ERROR: " + event.error +
+      " · Check microphone permission or type instead."
+    );
+  };
+
+  currentRecognition.onend = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      // Some browsers end a session after a pause.
+      // Restart only if the user has not pressed STOP.
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+
+        if (
+          listeningRequested &&
+          !recognitionActive &&
+          !recognitionStarting
+        ) {
+          startRecognition("continuous");
+        }
+      }, RESTART_DELAY_MS);
+
+      return;
+    }
+
+    if (mode === "continuous") {
+      resetContinuousControls();
+
+      if (!listeningRequested) {
+        updateVoiceStatus(
+          "Continuous listening is OFF."
+        );
+      }
+    } else if (
+      voiceStatus.textContent.startsWith("LISTENING")
+    ) {
+      updateVoiceStatus(
+        "SYSTEM READY · LOCAL PROTOTYPE"
+      );
+    }
+  };
+
+  try {
+    currentRecognition.start();
+  } catch (error) {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "COULD NOT START MICROPHONE · Check permission and try again."
+    );
+  }
+}
+
+// ------------------------------------------
+// ORIGINAL ONE-PHRASE SPEAK BUTTON
+// ------------------------------------------
+
+document.getElementById("mic").addEventListener(
+  "click",
+  () => {
+    if (
+      recognitionActive ||
+      recognitionStarting ||
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "Stop the current listening session before using Speak."
+      );
+      return;
+    }
+
+    startRecognition("single");
+  }
+);
+
+// ------------------------------------------
+// START CONTINUOUS LISTENING
+// ------------------------------------------
+
+continuousMic.addEventListener("click", () => {
+  if (
+    recognitionActive ||
+    recognitionStarting ||
+    listeningRequested
+  ) {
+    return;
+  }
+
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRee = "message rubi";
+    responseBubble.textContent = "RUBI AI: ";
+    chat.appendChild(responseBubble);
+
+    const savedMemory = personalMemory.value.trim();
+const recentHistory = chatHistory
   .slice(-8)
   .map(item =>
     (item.role === "user" ? "User: " : "RUBI AI: ") + item.text
