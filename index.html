@@ -504,6 +504,1396 @@ const recentHistory = chatHistory
   )
   .join("\n");
 const query =
+  "You are RUBI AI, a personal AI assistant created by Reuben Okechukwu David. " +
+  "The user is Reuben Okechukwu David, also known as Rubi. You are not Reuben. " +
+  "Be intelligent, friendly, natural and helpful. " +
+  "Answer the user's latest question directly and accurately. " +
+  "Use personal memory and recent conversation when relevant. " +
+  "Do not invent facts, repeat conversation transcripts or create imaginary dialogue. " +
+  "Write requested content fully instead of using placeholders. " +
+  "Never claim to perform actions you cannot perform. " +
+
+  "\nPERSONAL MEMORY:\n" +
+  (savedMemory || "No saved personal information.") +
+
+  "\nRECENT CONVERSATION:\n" +
+  (recentHistory || "No previous conversation.") +
+
+  "\nUSER QUESTION:\n" + message +
+
+  "\nANSWER:";
+
+let fullResponse = "";
+
+    try {
+      rubiAI.generateResponse(query, (partialResults, complete) => {
+        if (partialResults) {
+          fullResponse += partialResults;
+          responseBubble.textContent = "RUBI AI: " + fullResponse;
+        }
+
+        chat.scrollTop = chat.scrollHeight;
+
+        if (complete) {
+          isGenerating = false;
+          statusLine.textContent =
+            "RUBI AI READY · LOCAL GEMMA ENGINE";
+
+          if (fullResponse.trim()) {
+            chatHistory.push({
+              role: "user",
+              text: message
+            });
+
+            chatHistory.push({
+              role: "model",
+              text: fullResponse.trim()
+            });
+
+            say(fullResponse.trim());
+          } else {
+            responseBubble.textContent =
+              "RUBI AI: No response generated. Please try again.";
+          }
+        }
+      });
+    } catch (error) {
+      isGenerating = false;
+      console.error(error);
+
+      responseBubble.textContent =
+        "RUBI AI ERROR: " + (error.message || String(error));
+
+      statusLine.textContent = "AI RESPONSE ERROR";
+    }
+  }
+);
+
+// ==========================================
+// VOICE REPLIES ON / OFF
+// ==========================================
+
+speakToggle.addEventListener("click", () => {
+  voiceReplies = !voiceReplies;
+
+  speakToggle.textContent = voiceReplies
+    ? "🔊 Voice replies: ON"
+    : "🔇 Voice replies: OFF";
+
+  if (
+    !voiceReplies &&
+    "speechSynthesis" in window
+  ) {
+    window.speechSynthesis.cancel();
+  }
+});
+  function updateVoiceStatus(message) {
+  voiceStatus.textContent = message;
+  statusLine.textContent = message;
+  }
+
+function getSpeechRecognition() {
+  return (
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition ||
+    null
+  );
+}
+
+function clearVoiceTimers() {
+  if (restartTimer !== null) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
+  if (listeningTimer !== null) {
+    clearTimeout(listeningTimer);
+    listeningTimer = null;
+  }
+}
+
+function resetContinuousControls() {
+  continuousMic.disabled = false;
+  stopMic.disabled = true;
+}
+
+function stopContinuousListening(message) {
+  // Disable restart before asking the browser to stop.
+  listeningRequested = false;
+  clearVoiceTimers();
+
+  resetContinuousControls();
+
+  const currentRecognition = recognition;
+
+  if (
+    currentRecognition &&
+    recognitionMode === "continuous"
+  ) {
+    try {
+      currentRecognition.stop();
+    } catch (error) {
+      // The browser may already have stopped recognition.
+    }
+  }
+
+  updateVoiceStatus(
+    message || "Continuous listening is OFF."
+  );
+}
+
+function startRecognition(mode) {
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Use a supported browser or type instead."
+    );
+    return;
+  }
+
+  if (recognitionActive || recognitionStarting) {
+    updateVoiceStatus(
+      "A microphone session is already starting or running."
+    );
+    return;
+  }
+
+  if (
+    mode === "continuous" &&
+    !listeningRequested
+  ) {
+    return;
+  }
+
+  recognitionMode = mode;
+
+  const thisSession = ++sessionNumber;
+  const currentRecognition = new SpeechRecognition();
+
+  recognition = currentRecognition;
+  recognitionStarting = true;
+
+  currentRecognition.lang = "en-NG";
+  currentRecognition.interimResults = false;
+
+  // Continuous mode allows multiple final results
+  // during one listening session.
+  currentRecognition.continuous =
+    mode === "continuous";
+
+  currentRecognition.onstart = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionStarting = false;
+    recognitionActive = true;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "LISTENING · Speak naturally. Press STOP to finish."
+      );
+    } else {
+      updateVoiceStatus("LISTENING · Speak now.");
+    }
+  };
+
+  currentRecognition.onresult = event => {
+    if (thisSession !== sessionNumber) return;
+
+    // Only use final results to avoid inserting partial
+    // words repeatedly while the browser is listening.
+    let transcript = "";
+
+    for (
+      let i = event.resultIndex;
+      i < event.results.length;
+      i++
+    ) {
+      if (event.results[i].isFinal) {
+        transcript +=
+          event.results[i][0].transcript + " ";
+      }
+    }
+
+    transcript = transcript.trim();
+
+    if (!transcript) return;
+
+    // Never automatically send recognised speech.
+    if (mode === "continuous") {
+      input.value = [
+        input.value.trim(),
+        transcript
+      ].filter(Boolean).join(" ");
+
+      updateVoiceStatus(
+        "WORDS CAPTURED · Review the text. Listening remains active."
+      );
+    } else {
+      input.value = transcript;
+
+      updateVoiceStatus(
+        "VOICE CAPTURED · Check the text, then press Send."
+      );
+    }
+
+    input.focus();
+  };
+
+  currentRecognition.onerror = event => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE ERROR: " + event.error +
+      " · Check microphone permission or type instead."
+    );
+  };
+
+  currentRecognition.onend = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      // Some browsers end a session after a pause.
+      // Restart only if the user has not pressed STOP.
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+
+        if (
+          listeningRequested &&
+          !recognitionActive &&
+          !recognitionStarting
+        ) {
+          startRecognition("continuous");
+        }
+      }, RESTART_DELAY_MS);
+
+      return;
+    }
+
+    if (mode === "continuous") {
+      resetContinuousControls();
+
+      if (!listeningRequested) {
+        updateVoiceStatus(
+          "Continuous listening is OFF."
+        );
+      }
+    } else if (
+      voiceStatus.textContent.startsWith("LISTENING")
+    ) {
+      updateVoiceStatus(
+        "SYSTEM READY · LOCAL PROTOTYPE"
+      );
+    }
+  };
+
+  try {
+    currentRecognition.start();
+  } catch (error) {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "COULD NOT START MICROPHONE · Check permission and try again."
+    );
+  }
+}
+
+// ------------------------------------------
+// ORIGINAL ONE-PHRASE SPEAK BUTTON
+// ------------------------------------------
+
+document.getElementById("mic").addEventListener(
+  "click",
+  () => {
+    if (
+      recognitionActive ||
+      recognitionStarting ||
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "Stop the current listening session before using Speak."
+      );
+      return;
+    }
+
+    startRecognition("single");
+  }
+);
+
+// ------------------------------------------
+// START CONTINUOUS LISTENING
+// ------------------------------------------
+
+continuousMic.addEventListener("click", () => {
+  if (
+    recognitionActive ||
+    recognitionStarting ||
+    listeningRequested
+  ) {
+    return;
+  }
+
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Try a supported browser."
+    );
+    return;
+  }
+
+  listeningRequested = true;
+
+  continuousMic.disabled = true;
+  stopMic.disabled = false;
+
+  updateVoiceStatus(
+    "STARTING MICROPHONE · Allow access if asked."
+  );
+
+  // Hard limit: one continuous session can last
+  // no longer than five minutes.
+  listeningTimer = setTimeout(() => {
+    stopContinuousListening(
+      "5-MINUTE LIMIT REACHED · Listening stopped."
+    );
+  }, MAX_LISTENING_MS);
+
+  startRecognition("continuous");
+});
+
+// ------------------------------------------
+// STOP BUTTON
+// ------------------------------------------
+
+stopMic.addEventListener("click", () => {
+  stopContinuousListening(
+    "LISTENING STOPPED BY YOU."
+  );
+});
+// ==========================================
+// RUBI AI - PERSONAL MEMORY STORAGE
+// ==========================================
+
+try {
+  personalMemory.value =
+    localStorage.getItem("rubiPersonalMemory") || "";
+} catch (error) {
+  memoryStatus.textContent =
+    "Personal memory storage is unavailable.";
+}
+
+document.getElementById("saveMemory").addEventListener(
+  "click",
+  () => {
+    try {
+      localStorage.setItem(
+        "rubiPersonalMemory",
+        persona"div");
+    responseBubble.className = "message rubi";
+    responseBubble.textContent = "RUBI AI: ";
+    chat.appendChild(responseBubble);
+
+    const savedMemory = personalMemory.value.trim();
+const recentHistory = chatHistory
+  .slice(-4)
+  .map(item =>
+    (item.role === "user" ? "User: " : "RUBI AI: ") + item.text
+  )
+  .join("\n");
+const query =
+  "You are RUBI AI, a personal AI assistant created by Reuben Okechukwu David. " +
+  "The user is Reuben Okechukwu David, also known as Rubi. You are not Reuben. " +
+  "Be intelligent, friendly, natural and helpful. " +
+  "Answer the user's latest question directly and accurately. " +
+  "Use personal memory and recent conversation when relevant. " +
+  "Do not invent facts, repeat conversation transcripts or create imaginary dialogue. " +
+  "Write requested content fully instead of using placeholders. " +
+  "Never claim to perform actions you cannot perform. " +
+
+  "\nPERSONAL MEMORY:\n" +
+  (savedMemory || "No saved personal information.") +
+
+  "\nRECENT CONVERSATION:\n" +
+  (recentHistory || "No previous conversation.") +
+
+  "\nUSER QUESTION:\n" + message +
+
+  "\nANSWER:";
+
+let fullResponse = "";
+
+    try {
+      rubiAI.generateResponse(query, (partialResults, complete) => {
+        if (partialResults) {
+          fullResponse += partialResults;
+          responseBubble.textContent = "RUBI AI: " + fullResponse;
+        }
+
+        chat.scrollTop = chat.scrollHeight;
+
+        if (complete) {
+          isGenerating = false;
+          statusLine.textContent =
+            "RUBI AI READY · LOCAL GEMMA ENGINE";
+
+          if (fullResponse.trim()) {
+            chatHistory.push({
+              role: "user",
+              text: message
+            });
+
+            chatHistory.push({
+              role: "model",
+              text: fullResponse.trim()
+            });
+
+            say(fullResponse.trim());
+          } else {
+            responseBubble.textContent =
+              "RUBI AI: No response generated. Please try again.";
+          }
+        }
+      });
+    } catch (error) {
+      isGenerating = false;
+      console.error(error);
+
+      responseBubble.textContent =
+        "RUBI AI ERROR: " + (error.message || String(error));
+
+      statusLine.textContent = "AI RESPONSE ERROR";
+    }
+  }
+);
+
+// ==========================================
+// VOICE REPLIES ON / OFF
+// ==========================================
+
+speakToggle.addEventListener("click", () => {
+  voiceReplies = !voiceReplies;
+
+  speakToggle.textContent = voiceReplies
+    ? "🔊 Voice replies: ON"
+    : "🔇 Voice replies: OFF";
+
+  if (
+    !voiceReplies &&
+    "speechSynthesis" in window
+  ) {
+    window.speechSynthesis.cancel();
+  }
+});
+  function updateVoiceStatus(message) {
+  voiceStatus.textContent = message;
+  statusLine.textContent = message;
+  }
+
+function getSpeechRecognition() {
+  return (
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition ||
+    null
+  );
+}
+
+function clearVoiceTimers() {
+  if (restartTimer !== null) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
+  if (listeningTimer !== null) {
+    clearTimeout(listeningTimer);
+    listeningTimer = null;
+  }
+}
+
+function resetContinuousControls() {
+  continuousMic.disabled = false;
+  stopMic.disabled = true;
+}
+
+function stopContinuousListening(message) {
+  // Disable restart before asking the browser to stop.
+  listeningRequested = false;
+  clearVoiceTimers();
+
+  resetContinuousControls();
+
+  const currentRecognition = recognition;
+
+  if (
+    currentRecognition &&
+    recognitionMode === "continuous"
+  ) {
+    try {
+      currentRecognition.stop();
+    } catch (error) {
+      // The browser may already have stopped recognition.
+    }
+  }
+
+  updateVoiceStatus(
+    message || "Continuous listening is OFF."
+  );
+}
+
+function startRecognition(mode) {
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Use a supported browser or type instead."
+    );
+    return;
+  }
+
+  if (recognitionActive || recognitionStarting) {
+    updateVoiceStatus(
+      "A microphone session is already starting or running."
+    );
+    return;
+  }
+
+  if (
+    mode === "continuous" &&
+    !listeningRequested
+  ) {
+    return;
+  }
+
+  recognitionMode = mode;
+
+  const thisSession = ++sessionNumber;
+  const currentRecognition = new SpeechRecognition();
+
+  recognition = currentRecognition;
+  recognitionStarting = true;
+
+  currentRecognition.lang = "en-NG";
+  currentRecognition.interimResults = false;
+
+  // Continuous mode allows multiple final results
+  // during one listening session.
+  currentRecognition.continuous =
+    mode === "continuous";
+
+  currentRecognition.onstart = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionStarting = false;
+    recognitionActive = true;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "LISTENING · Speak naturally. Press STOP to finish."
+      );
+    } else {
+      updateVoiceStatus("LISTENING · Speak now.");
+    }
+  };
+
+  currentRecognition.onresult = event => {
+    if (thisSession !== sessionNumber) return;
+
+    // Only use final results to avoid inserting partial
+    // words repeatedly while the browser is listening.
+    let transcript = "";
+
+    for (
+      let i = event.resultIndex;
+      i < event.results.length;
+      i++
+    ) {
+      if (event.results[i].isFinal) {
+        transcript +=
+          event.results[i][0].transcript + " ";
+      }
+    }
+
+    transcript = transcript.trim();
+
+    if (!transcript) return;
+
+    // Never automatically send recognised speech.
+    if (mode === "continuous") {
+      input.value = [
+        input.value.trim(),
+        transcript
+      ].filter(Boolean).join(" ");
+
+      updateVoiceStatus(
+        "WORDS CAPTURED · Review the text. Listening remains active."
+      );
+    } else {
+      input.value = transcript;
+
+      updateVoiceStatus(
+        "VOICE CAPTURED · Check the text, then press Send."
+      );
+    }
+
+    input.focus();
+  };
+
+  currentRecognition.onerror = event => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "VOICE ERROR: " + event.error +
+      " · Check microphone permission or type instead."
+    );
+  };
+
+  currentRecognition.onend = () => {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (
+      mode === "continuous" &&
+      listeningRequested
+    ) {
+      // Some browsers end a session after a pause.
+      // Restart only if the user has not pressed STOP.
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+
+        if (
+          listeningRequested &&
+          !recognitionActive &&
+          !recognitionStarting
+        ) {
+          startRecognition("continuous");
+        }
+      }, RESTART_DELAY_MS);
+
+      return;
+    }
+
+    if (mode === "continuous") {
+      resetContinuousControls();
+
+      if (!listeningRequested) {
+        updateVoiceStatus(
+          "Continuous listening is OFF."
+        );
+      }
+    } else if (
+      voiceStatus.textContent.startsWith("LISTENING")
+    ) {
+      updateVoiceStatus(
+        "SYSTEM READY · LOCAL PROTOTYPE"
+      );
+    }
+  };
+
+  try {
+    currentRecognition.start();
+  } catch (error) {
+    if (thisSession !== sessionNumber) return;
+
+    recognitionActive = false;
+    recognitionStarting = false;
+
+    if (mode === "continuous") {
+      listeningRequested = false;
+      clearVoiceTimers();
+      resetContinuousControls();
+    }
+
+    updateVoiceStatus(
+      "COULD NOT START MICROPHONE · Check permission and try again."
+    );
+  }
+}
+
+// ------------------------------------------
+// ORIGINAL ONE-PHRASE SPEAK BUTTON
+// ------------------------------------------
+
+document.getElementById("mic").addEventListener(
+  "click",
+  () => {
+    if (
+      recognitionActive ||
+      recognitionStarting ||
+      listeningRequested
+    ) {
+      updateVoiceStatus(
+        "Stop the current listening session before using Speak."
+      );
+      return;
+    }
+
+    startRecognition("single");
+  }
+);
+
+// ------------------------------------------
+// START CONTINUOUS LISTENING
+// ------------------------------------------
+
+continuousMic.addEventListener("click", () => {
+  if (
+    recognitionActive ||
+    recognitionStarting ||
+    listeningRequested
+  ) {
+    return;
+  }
+
+  const SpeechRecognition = getSpeechRecognition();
+
+  if (!SpeechRecognition) {
+    updateVoiceStatus(
+      "VOICE INPUT UNAVAILABLE · Try a supported browser."
+    );
+    return;
+  }
+
+  listeningRequested = true;
+
+  continuousMic.disabled = true;
+  stopMic.disabled = false;
+
+  updateVoiceStatus(
+    "STARTING MICROPHONE · Allow access if asked."
+  );
+
+  // Hard limit: one continuous session can last
+  // no longer than five minutes.
+  listeningTimer = setTimeout(() => {
+    stopContinuousListening(
+      "5-MINUTE LIMIT REACHED · Listening stopped."
+    );
+  }, MAX_LISTENING_MS);
+
+  startRecognition("continuous");
+});
+
+// ------------------------------------------
+// STOP BUTTON
+// ------------------------------------------
+
+stopMic.addEventListener("click", () => {
+  stopContinuousListening(
+    "LISTENING STOPPED BY YOU."
+  );
+});
+// ==========================================
+// RUBI AI - PERSONAL MEMORY STORAGE
+// ==========================================
+
+try {
+  personalMemory.value =
+    localStorage.getItem("rubiPersonalMemory") || "";
+} catch (error) {
+  memoryStatus.textContent =
+    "Personal memory storage is unavailable.";
+}
+
+document.getElementById("saveMemory").addEventListener(
+  "click",
+  () => {
+    try {
+      localStorage.setItem(
+        "rubiPersonalMemory",
+        personalMemory.value
+      );
+
+      memoryStatus.textContent =
+        "Personal memory saved on this device.";
+    } catch (error) {
+      memoryStatus.textContent =
+        "Could not save personal memory.";
+    }
+  }
+);
+// ==========================================
+// MY NOTES - LOCAL DEVICE STORAGE
+// ==========================================
+
+try {
+  notes.value = localStorage.getItem("rubiNotes") || "";
+} catch (error) {
+  noteStatus.textContent =
+    "Browser storage is unavailable in this session.";
+}
+
+document.getElementById("saveNotes").addEventListener(
+  "click",
+  () => {
+    try {
+      localStorage.setItem("rubiNotes", notes.value);
+
+      noteStatus.textContent =
+        "Notes saved in this browser on this device.";
+    } catch (error) {
+      noteStatus.textContent =
+        "Could not save notes. Check browser storage settings.";
+    }
+  }
+);
+</script>
+</body>
+</html>en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#180914">
+<title>RUBI AI</title>
+
+<style>
+:root {
+  color-scheme: dark;
+  --ruby: #660033;
+  --gold: #b99753;
+  --bg: #120a10;
+  --panel: #21151e;
+  --text: #f8edf4;
+  --muted: #c1aeb9;
+}
+
+* {
+  box-sizing: border-box;
+  }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px system-ui, sans-serif;
+}
+
+header {
+  padding: 22px 18px;
+  text-align: center;
+  background: linear-gradient(135deg, #660033, #260d20);
+  border-bottom: 1px solid var(--gold);
+}
+
+h1 {
+  margin: 0;
+  letter-spacing: 3px;
+}
+
+header p {
+  margin: 6px 0 0;
+  color: #ead5df;
+}
+
+main {
+  max-width: 700px;
+  margin: auto;
+  padding: 16px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid #493041;
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.status {
+  color: var(--gold);
+  font-size: 14px;
+}
+
+#chat {
+  height: 270px;
+  overflow-y: auto;
+  margin: 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message {
+  padding: 11px 13px;
+  border-radius: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rubi {
+  background: #382033;
+  align-self: flex-start;
+  max-width: 95%;
+}
+
+.user {
+  background: var(--ruby);
+  align-self: flex-end;
+  max-width: 95%;
+}
+
+input,
+textarea,
+button {
+  width: 100%;
+  font: inherit;
+  border-radius: 9px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+input,
+textarea {
+  color: var(--text);
+  background: #130d12;
+  border: 1px solid #654657;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  background: var(--ruby);
+  color: white;
+  border: 1px solid var(--gold);
+  cursor: pointer;
+}
+
+button:focus,
+input:focus,
+textarea:focus {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+small,
+.hint {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hint {
+  font-size: 13px;
+}
+
+#stopMic {
+  background: #8b1717;
+}
+
+#voiceStatus {
+  min-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 420px) {
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+</head>
+
+<body>
+<header>
+  <h1>RUBI AI</h1>
+  <p>Your personal assistant · Prototype 0.2</p>
+</header>
+
+<main>
+  
+<section class="panel">
+  <h2>RUBI AI Brain</h2>
+
+  <p class="hint">
+    Load your Gemma AI model from your phone.
+    The model runs locally in your browser.
+  </p>
+
+<input
+  type="file"
+  id="modelFile"
+  accept=".task"
+>
+
+<p id="modelStatus" class="status">
+  AI BRAIN OFFLINE · MODEL NOT LOADED
+</p>
+
+</section>
+
+<section class="panel">
+<div class="status" id="status" role="status">
+  SYSTEM READY · LOCAL PROTOTYPE
+</div>
+
+<div id="chat"></div>
+
+<form id="chatForm">
+  <label for="message">Message RUBI AI</label>
+
+  <input
+    id="message"
+    autocomplete="off"
+    placeholder="Type a message..."
+    required
+  >
+
+      <div class="actions">
+        <button type="submit">Send message</button>
+        <button type="button" id="mic">🎙 Speak</button>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="continuousMic">
+          🎙 Start continuous listening
+        </button>
+
+        <button type="button" id="stopMic" disabled>
+          ⏹ STOP LISTENING
+        </button>
+      </div>
+
+      <p class="hint" id="voiceStatus" aria-live="polite">
+        Continuous listening is OFF.
+      </p>
+    </form>
+<button type="button" id="speakToggle">
+  🔇 Voice replies: OFF
+</button>
+
+    <p class="hint">
+      Voice recognition depends on browser support and may send
+      audio to an online service. Spoken words are not sent
+      automatically. Review the text and press Send message.
+    </p>
+  </section>
+
+<section class="panel">
+  <h2>RUBI AI Personal Memory</h2>
+
+  <p class="hint">
+    Save important personal details and preferences.
+    RUBI AI can use these details in future conversations.
+    Information stays in this browser on this device.
+  </p>
+
+  <textarea
+    id="personalMemory"
+    rows="5"
+    placeholder="Example: My business name is RUBI SERVICES. I run a laundry and dry-cleaning business."
+  ></textarea>
+
+  <button type="button" id="saveMemory">
+    Save Personal Memory
+  </button>
+
+  <p id="memoryStatus" class="status" aria-live="polite"></p>
+</section>
+
+<section class="panel">
+  <h2>My Notes</h2>
+
+  <p class="hint">
+    Notes are stored in this browser on this device.
+    They are not synced to another phone or computer.
+  </p>
+
+  <textarea
+    id="notes"
+    rows="4"
+    placeholder="Save project ideas and reminders here..."
+  ></textarea>
+
+  <button type="button" id="saveNotes">
+    Save notes on this device
+  </button>
+
+  <p id="noteStatus" class="status" aria-live="polite"></p>
+</section>
+
+</main>
+
+<script type="module">
+"use strict";
+
+import {
+  FilesetResolver,
+  LlmInference
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai";
+
+// ==========================================
+// RUBI AI - CORE CHAT
+// ==========================================
+
+const chat = document.getElementById("chat");
+const input = document.getElementById("message");
+const statusLine = document.getElementById("status");
+const notes = document.getElementById("notes");
+const personalMemory = document.getElementById("personalMemory");
+const memoryStatus = document.getElementById("memoryStatus");
+const continuousMic = document.getElementById("continuousMic");
+const stopMic = document.getElementById("stopMic");
+const voiceStatus = document.getElementById("voiceStatus");
+
+const speakToggle = document.getElementById("speakToggle");
+const noteStatus = document.getElementById("noteStatus");
+
+let voiceReplies = false;
+// VOICE RECOGNITION STATE
+let recognition = null;
+let recognitionActive = false;
+let recognitionStarting = false;
+let recognitionMode = null;
+let listeningRequested = false;
+
+let sessionNumber = 0;
+let restartTimer = null;
+let listeningTimer = null;
+
+const RESTART_DELAY_MS = 1000;
+const MAX_LISTENING_MS = 5 * 60 * 1000;
+// RUBI AI LOCAL GEMMA ENGINE
+let rubiAI = null;
+let aiReady = false;
+let chatHistory = [];
+let isGenerating = false;
+const modelFile = document.getElementById("modelFile");
+const modelStatus = document.getElementById("modelStatus");
+ 
+async function loadGemmaModel(file) {
+  try {
+    aiReady = false;
+    rubiAI = null;
+
+    modelStatus.textContent = "LOADING GEMMA MODEL...";
+    statusLine.textContent = "INITIALISING LOCAL AI BRAIN...";
+
+    const genaiFileset = await FilesetResolver.forGenAiTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai/wasm"
+    );
+
+    const reader = file.stream().getReader();
+
+    modelStatus.textContent =
+      "MODEL FILE READY · INITIALISING GEMMA...";
+
+    rubiAI = await LlmInference.createFromOptions(genaiFileset, {
+      baseOptions: {
+        modelAssetBuffer: reader
+      },
+      maxTokens: 1024,
+      topK: 32,
+      temperature: 0.7
+    });
+
+    aiReady = true;
+
+    modelStatus.textContent =
+      "GEMMA MODEL LOADED · AI BRAIN ONLINE";
+
+    statusLine.textContent =
+      "RUBI AI READY · LOCAL GEMMA ENGINE";
+
+  } catch (error) {
+    aiReady = false;
+    rubiAI = null;
+
+    modelStatus.textContent =
+      "MODEL LOADING FAILED: " +
+      (error.message || String(error));
+
+    statusLine.textContent = "AI INITIALISATION ERROR";
+
+    console.error(error);
+
+    alert("RUBI AI could not load the model. Please try again.");
+  }
+}
+
+modelFile.addEventListener("change", () => {
+  const file = modelFile.files[0];
+
+  if (!file) {
+    modelStatus.textContent = "NO MODEL FILE SELECTED";
+    return;
+  }
+
+  modelStatus.textContent =
+    "FILE SELECTED · STARTING MODEL LOAD...";
+
+  loadGemmaModel(file);
+});
+
+function addMessage(text, who) {
+  const bubble = document.createElement("div");
+
+  bubble.className = "message " + who;
+  bubble.textContent = text;
+
+  chat.appendChild(bubble);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function say(text) {
+  if (
+    !voiceReplies ||
+    !("speechSynthesis" in window)
+  ) {
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-NG";
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function replyTo(message) {
+  const q = message.toLowerCase().trim();
+
+  if (q.includes("time")) {
+    return "The time is " +
+      new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      }) + ".";
+  }
+
+  if (q.includes("date") || q.includes("day")) {
+    return "Today is " +
+      new Date().toLocaleDateString([], {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+      }) + ".";
+  }
+
+  if (
+    q === "hi" ||
+    q === "hello" ||
+    q.includes("hello rubi")
+  ) {
+    return "Hello! RUBI AI is ready. What shall we work on?";
+  }
+
+  if (q.includes("help")) {
+    return "Try: hello, what time is it, what is today's date, or save your ideas in My Notes. Full AI and computer control are not connected yet.";
+  }
+
+  return "I received: \"" + message +
+    "\". My online AI brain is not connected yet. This is the first interface milestone.";
+}
+
+// ==========================================
+// RUBI AI - GEMMA CHAT CONNECTION
+// ==========================================
+
+document.getElementById("chatForm").addEventListener(
+  "submit",
+  event => {
+    event.preventDefault();
+
+    if (isGenerating) {
+      statusLine.textContent = "RUBI AI IS STILL THINKING...";
+      return;
+    }
+
+    const message = input.value.trim();
+    if (!message) return;
+
+    addMessage("You: " + message, "user");
+    input.value = "";
+
+    if (!aiReady || !rubiAI) {
+      const answer = replyTo(message);
+      addMessage("RUBI AI: " + answer, "rubi");
+      say(answer);
+      return;
+    }
+
+    isGenerating = true;
+    statusLine.textContent = "RUBI AI IS THINKING...";
+
+    const responseBubble = document.createElement("div");
+    responseBubble.className = "message rubi";
+    responseBubble.textContent = "RUBI AI: ";
+    chat.appendChild(responseBubble);
+
+    const savedMemory = personalMemory.value.trim();
+const recentHistory = chatHistory
+  .slice(-4)
+  .map(item =>
+    (item.role === "user" ? "User: " : "RUBI AI: ") + item.text
+  )
+  .join("\n");
+const query =
   "IDENTITY: You are RUBI AI, a personal AI assistant created by Reuben Okechukwu David. " +
 "Your name is RUBI AI. The human user is Reuben Okechukwu David, also known as Rubi. " +
 "Never confuse the user's identity with your own. If asked for the user's name, answer Reuben Okechukwu David. " +
